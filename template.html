@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Desk Object Classifier</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 420px; margin: 40px auto; padding: 0 16px; text-align: center; }
+  img, video { max-width: 100%; max-height: 300px; margin: 16px 0; border-radius: 8px; display: none; }
+  button { margin-top: 12px; padding: 6px 14px; }
+  #result { font-size: 1.4rem; font-weight: 600; margin: 8px 0; }
+  table { margin: 0 auto; border-collapse: collapse; }
+  td { padding: 2px 10px; text-align: left; }
+</style>
+</head>
+<body>
+  <h1>Desk Object Classifier</h1>
+  <p>Upload a photo of a pen, a phone or a water bottle, or use the webcam.</p>
+  <input type="file" id="photo" accept="image/*" disabled>
+  <br>
+  <button id="webcamButton" disabled>Start webcam</button>
+  <br>
+  <img id="preview" alt="Uploaded photo">
+  <video id="webcam" autoplay playsinline muted></video>
+  <div id="result">Loading model…</div>
+  <table id="scores"></table>
+
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.7.4/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8.5/dist/teachablemachine-image.min.js"></script>
+  <script>
+    // Model exported from Teachable Machine, embedded by build_app.py
+    const MODEL = __MODEL__;
+    const METADATA = __METADATA__;
+    const WEIGHTS_BASE64 = "__WEIGHTS__";
+
+    const photo = document.getElementById("photo");
+    const preview = document.getElementById("preview");
+    const result = document.getElementById("result");
+    const scores = document.getElementById("scores");
+    const webcam = document.getElementById("webcam");
+    const webcamButton = document.getElementById("webcamButton");
+    let model;
+    let stream = null;
+
+    async function showPrediction(source) {
+      const predictions = await model.predict(source);
+      predictions.sort((a, b) => b.probability - a.probability);
+      const top = predictions[0];
+      result.textContent = `${top.className} (${(top.probability * 100).toFixed(1)}% confident)`;
+      scores.innerHTML = predictions
+        .map(p => `<tr><td>${p.className}</td><td>${(p.probability * 100).toFixed(1)}%</td></tr>`)
+        .join("");
+    }
+
+    function stopWebcam() {
+      if (!stream) return;
+      stream.getTracks().forEach(track => track.stop());
+      stream = null;
+      webcam.style.display = "none";
+      webcamButton.textContent = "Start webcam";
+    }
+
+    async function webcamLoop() {
+      while (stream) {
+        if (webcam.readyState >= 2) await showPrediction(webcam);
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+    }
+
+    webcamButton.addEventListener("click", async () => {
+      if (stream) return stopWebcam();
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      } catch (err) {
+        result.textContent = "Could not open the webcam: " + err.message;
+        return;
+      }
+      preview.style.display = "none";
+      webcam.srcObject = stream;
+      webcam.style.display = "inline";
+      webcamButton.textContent = "Stop webcam";
+      webcamLoop();
+    });
+
+    async function loadModel() {
+      const bytes = Uint8Array.from(atob(WEIGHTS_BASE64), c => c.charCodeAt(0));
+      model = await tmImage.loadFromFiles(
+        new File([JSON.stringify(MODEL)], "model.json", { type: "application/json" }),
+        new File([bytes], "weights.bin"),
+        new File([JSON.stringify(METADATA)], "metadata.json", { type: "application/json" })
+      );
+      result.textContent = "Ready";
+      photo.disabled = false;
+      webcamButton.disabled = false;
+    }
+
+    photo.addEventListener("change", () => {
+      if (!photo.files.length) return;
+      stopWebcam();
+      preview.src = URL.createObjectURL(photo.files[0]);
+      preview.style.display = "inline";
+    });
+
+    preview.addEventListener("load", () => showPrediction(preview));
+
+    loadModel().catch(err => { result.textContent = "Could not load the model: " + err.message; });
+  </script>
+</body>
+</html>
